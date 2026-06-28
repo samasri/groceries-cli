@@ -2,3 +2,5 @@ node_modules/
 dist/
 .cache/
 .env
+src/adapters/metro/SELECTORS.md
+plan*.md

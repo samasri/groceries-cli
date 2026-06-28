@@ -56,6 +56,7 @@ describe('nofrillsProductAdapter', () => {
       const product = await adapter.fetchDetail('20188873_EA', '7952');
 
       expect(product).toMatchObject({
+        chain: 'nofrills',
         productId: '20188873_EA',
         sku: '20188873',
         name: '2% Milk',

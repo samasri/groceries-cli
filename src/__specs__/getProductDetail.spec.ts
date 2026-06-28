@@ -3,6 +3,8 @@ import { ProductGateway } from '../ports/ProductGateway';
 import { ProductTile, Product } from '../domain/product';
 
 const tile: ProductTile = {
+  chain: 'nofrills',
+  source: 'main',
   productId: '20188873_EA',
   sku: '20188873',
   name: '2% Milk',
@@ -13,6 +15,8 @@ const tile: ProductTile = {
 };
 
 const enrichedProduct: Product = {
+  chain: 'nofrills',
+  source: 'main',
   productId: '20188873_EA',
   sku: '20188873',
   name: '2% Milk',
@@ -49,8 +53,19 @@ describe('enrichTileWithDetail', () => {
       name: tile.name,
       brand: tile.brand,
       price: tile.price,
+      source: 'main',
     });
     expect(result.availableAtStore).toBeUndefined();
     expect(result.nutritionFacts).toBeUndefined();
+  });
+
+  it('overlays tile.source onto the gateway-returned product', async () => {
+    const productGateway: ProductGateway = {
+      fetchDetail: jest.fn().mockResolvedValueOnce({ ...enrichedProduct, source: 'main' }),
+    };
+
+    const result = await enrichTileWithDetail({ ...tile, source: 'related' }, '7952', productGateway);
+
+    expect(result.source).toBe('related');
   });
 });

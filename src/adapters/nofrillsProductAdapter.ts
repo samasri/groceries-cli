@@ -110,6 +110,8 @@ const resolvePrice = (offers?: RawOffer[]): number | undefined => {
 };
 
 const mapProduct = (raw: RawProduct): Product => ({
+  chain: 'nofrills',
+  source: 'main',
   productId: raw.code,
   sku: raw.articleNumber ?? raw.code.split('_')[0],
   name: raw.name,

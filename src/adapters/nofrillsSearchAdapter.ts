@@ -1,9 +1,11 @@
 import { SearchGateway } from '../ports/SearchGateway';
 import { BuildIdProvider } from '../ports/BuildIdProvider';
-import { SearchPage, ProductTile } from '../domain/product';
+import { SearchPage, ProductTile, TileSource } from '../domain/product';
 import { httpGet } from '../infrastructure/httpClient';
+import { UpstreamAnomalyReporter, createUpstreamAnomalyReporter } from '../infrastructure/upstreamAnomaly';
 
 const SEARCH_BASE = 'https://www.nofrills.ca/_next/data';
+const GRID_COMPONENT_ID = 'productGridComponent';
 
 interface RawTile {
   productId: string;
@@ -39,17 +41,26 @@ interface RawSearchResponse {
   };
 }
 
+interface TaggedGrid {
+  source: TileSource;
+  data: RawGridData;
+}
+
 const buildSearchUrl = (buildId: string, term: string, storeId: string, page: number) =>
   `${SEARCH_BASE}/${buildId}/en/search.json?search-bar=${encodeURIComponent(term)}&storeId=${storeId}&page=${page}`;
 
-const extractGridData = (raw: RawSearchResponse): RawGridData | null => {
+const sourceForGridIndex = (index: number): TileSource => (index === 0 ? 'main' : 'related');
+
+const extractTaggedGrids = (raw: RawSearchResponse): TaggedGrid[] => {
   const components =
     raw?.pageProps?.initialSearchData?.layout?.sections?.mainContentCollection?.components ?? [];
-  const grid = components.find((c) => c.componentId === 'productGridComponent');
-  return grid?.data ?? null;
+  const grids = components.filter((c) => c.componentId === GRID_COMPONENT_ID);
+  return grids.map((grid, index) => ({ source: sourceForGridIndex(index), data: grid.data }));
 };
 
-const mapTile = (raw: RawTile): ProductTile => ({
+const mapTile = (raw: RawTile, source: TileSource): ProductTile => ({
+  chain: 'nofrills',
+  source,
   productId: raw.productId,
   sku: raw.articleNumber,
   name: raw.title,
@@ -59,27 +70,66 @@ const mapTile = (raw: RawTile): ProductTile => ({
   price: raw.pricing?.price ? parseFloat(raw.pricing.price) : undefined,
 });
 
-export const createNofrillsSearchAdapter = (buildIdProvider: BuildIdProvider): SearchGateway => ({
-  searchTiles: async (term: string, storeId: string, page: number): Promise<SearchPage> => {
-    const buildId = await buildIdProvider.getBuildId();
-    const url = buildSearchUrl(buildId, term, storeId, page);
-    const response = await httpGet(url);
+const dedupeByProductId = (tiles: ProductTile[]): ProductTile[] => {
+  const seen = new Set<string>();
+  return tiles.filter((tile) => {
+    if (seen.has(tile.productId)) return false;
+    seen.add(tile.productId);
+    return true;
+  });
+};
 
-    if (response.status === 404) {
-      await buildIdProvider.invalidate();
-      throw new Error('Search returned 404 — buildId invalidated, please retry');
-    }
+const mergeGrids = (grids: TaggedGrid[]): SearchPage => {
+  const [mainGrid] = grids;
+  const allTiles = grids.flatMap((g) => g.data.productTiles.map((raw) => mapTile(raw, g.source)));
+  return {
+    pagination: mainGrid.data.pagination,
+    productTiles: dedupeByProductId(allTiles),
+  };
+};
 
-    if (!response.ok) throw new Error(`Search request failed: ${response.status}`);
+export interface NofrillsSearchAdapterConfig {
+  anomalyReporter?: UpstreamAnomalyReporter;
+}
 
-    const raw = (await response.json()) as RawSearchResponse;
-    const gridData = extractGridData(raw);
+export const createNofrillsSearchAdapter = (
+  buildIdProvider: BuildIdProvider,
+  config: NofrillsSearchAdapterConfig = {},
+): SearchGateway => {
+  const anomalyReporter = config.anomalyReporter ?? createUpstreamAnomalyReporter();
 
-    if (!gridData) throw new Error('Could not extract product grid from search response');
+  return {
+    searchTiles: async (term: string, storeId: string, page: number): Promise<SearchPage> => {
+      const buildId = await buildIdProvider.getBuildId();
+      const url = buildSearchUrl(buildId, term, storeId, page);
+      const response = await httpGet(url);
 
-    return {
-      pagination: gridData.pagination,
-      productTiles: gridData.productTiles.map(mapTile),
-    };
-  },
-});
+      if (response.status === 404) {
+        await buildIdProvider.invalidate();
+        throw new Error('Search returned 404 — buildId invalidated, please retry');
+      }
+
+      if (!response.ok) throw new Error(`Search request failed: ${response.status}`);
+
+      const raw = (await response.json()) as RawSearchResponse;
+      const grids = extractTaggedGrids(raw);
+
+      if (grids.length === 0) {
+        await anomalyReporter.recordSearchAnomaly(
+          {
+            chain: 'nofrills',
+            kind: 'missing-product-grid',
+            url,
+            httpStatus: response.status,
+            query: term,
+            storeId,
+          },
+          raw,
+        );
+        throw new Error('Could not extract product grid from search response');
+      }
+
+      return mergeGrids(grids);
+    },
+  };
+};

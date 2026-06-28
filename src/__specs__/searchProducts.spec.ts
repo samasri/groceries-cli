@@ -1,10 +1,19 @@
 import { searchProducts } from '../useCases/searchProducts';
 import { SearchGateway } from '../ports/SearchGateway';
 import { ProductGateway } from '../ports/ProductGateway';
-import { BO_STORE } from '../domain/store';
+import { Store } from '../domain/store';
 import { Product, SearchPage } from '../domain/product';
 
+const makeNofrillsStore = (): Store => ({
+  chain: 'nofrills',
+  id: '7952',
+  name: 'No Frills #7952',
+  address: '',
+});
+
 const makeTile = (id: string, n: number) => ({
+  chain: 'nofrills' as const,
+  source: 'main' as const,
   productId: `${id}_EA`,
   sku: id,
   name: `Product ${n}`,
@@ -18,6 +27,8 @@ const makeSearchPage = (tiles: ReturnType<typeof makeTile>[], totalResults = 15)
 });
 
 const makeProduct = (id: string, available: boolean): Product => ({
+  chain: 'nofrills',
+  source: 'main',
   productId: `${id}_EA`,
   sku: id,
   name: `Product ${id}`,
@@ -61,7 +72,7 @@ describe('searchProducts', () => {
 
       const result = await searchProducts(
         'juice',
-        BO_STORE,
+        makeNofrillsStore(),
         defaultOptions,
         searchGateway,
         productGateway,
@@ -69,7 +80,7 @@ describe('searchProducts', () => {
 
       expect(result.results).toHaveLength(2);
       expect(result.query).toBe('juice');
-      expect(result.store).toEqual(BO_STORE);
+      expect(result.store).toMatchObject({ chain: 'nofrills', id: '7952' });
     });
 
     it('respects the limit option', async () => {
@@ -81,7 +92,7 @@ describe('searchProducts', () => {
 
       const result = await searchProducts(
         'snack',
-        BO_STORE,
+        makeNofrillsStore(),
         { ...defaultOptions, limit: 3 },
         searchGateway,
         productGateway,
@@ -104,7 +115,7 @@ describe('searchProducts', () => {
 
       const result = await searchProducts(
         'bread',
-        BO_STORE,
+        makeNofrillsStore(),
         { ...defaultOptions, availableOnly: true },
         searchGateway,
         productGateway,
@@ -125,7 +136,7 @@ describe('searchProducts', () => {
 
       const result = await searchProducts(
         'chips',
-        BO_STORE,
+        makeNofrillsStore(),
         defaultOptions,
         searchGateway,
         productGateway,
@@ -157,7 +168,7 @@ describe('searchProducts', () => {
 
       await searchProducts(
         'test',
-        BO_STORE,
+        makeNofrillsStore(),
         { ...defaultOptions, concurrency: 2, limit: 6 },
         searchGateway,
         productGateway,
@@ -175,13 +186,37 @@ describe('searchProducts', () => {
 
       const result = await searchProducts(
         'water',
-        BO_STORE,
+        makeNofrillsStore(),
         defaultOptions,
         searchGateway,
         productGateway,
       );
 
       expect(result.totalResults).toBe(99);
+    });
+
+    it('stops paginating when the gateway reports hasMore=false, even if tiles.length < limit', async () => {
+      const tiles = [makeTile('A', 1), makeTile('B', 2)];
+      const exhaustedPage: SearchPage = {
+        pagination: { pageNumber: 1, pageSize: 48, totalResults: 2, hasMore: false, isLast: true },
+        productTiles: tiles,
+      };
+      const searchGateway = makeSearchGateway([exhaustedPage]);
+      const productGateway = makeProductGateway({
+        A_EA: makeProduct('A', true),
+        B_EA: makeProduct('B', true),
+      });
+
+      const result = await searchProducts(
+        'pinto beans',
+        makeNofrillsStore(),
+        { ...defaultOptions, limit: 20 },
+        searchGateway,
+        productGateway,
+      );
+
+      expect(result.results).toHaveLength(2);
+      expect(searchGateway.searchTiles).toHaveBeenCalledTimes(1);
     });
   });
 });

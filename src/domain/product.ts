@@ -1,3 +1,7 @@
+import { Chain } from './chain';
+
+export type TileSource = 'main' | 'related';
+
 export interface NutrientValue {
   amount: string;
   dailyValue?: string;
@@ -31,6 +35,8 @@ export interface Offer {
 }
 
 export interface Product {
+  chain: Chain;
+  source: TileSource;
   productId: string;
   sku: string;
   name: string;
@@ -44,6 +50,8 @@ export interface Product {
 }
 
 export interface ProductTile {
+  chain: Chain;
+  source: TileSource;
   productId: string;
   sku: string;
   name: string;
@@ -51,6 +59,7 @@ export interface ProductTile {
   description?: string;
   packageSize?: string;
   price?: number;
+  detailUrl?: string;
 }
 
 export interface SearchPage {

@@ -4,9 +4,6 @@ import { SearchGateway } from '../ports/SearchGateway';
 import { ProductGateway } from '../ports/ProductGateway';
 import { enrichTileWithDetail } from './getProductDetail';
 
-const PAGE_DELAY_MS = 300;
-const TILES_PER_PAGE = 15;
-
 export interface SearchOptions {
   limit: number;
   page: number;
@@ -20,8 +17,6 @@ export interface SearchResult {
   totalResults: number;
   results: Product[];
 }
-
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const runWithConcurrency = async <T>(
   items: T[],
@@ -51,17 +46,14 @@ const collectTiles = async (
   let page = startPage;
 
   while (tiles.length < limit) {
-    if (page > startPage) await delay(PAGE_DELAY_MS);
-
     const searchPage = await searchGateway.searchTiles(term, storeId, page);
     ({ totalResults } = searchPage.pagination);
 
     tiles.push(...searchPage.productTiles);
 
-    const isLastByCount = page * TILES_PER_PAGE >= totalResults;
-    const isLastBySize = searchPage.productTiles.length < TILES_PER_PAGE;
-
-    if (isLastByCount || isLastBySize) break;
+    if (!searchPage.pagination.hasMore) break;
+    if (searchPage.productTiles.length === 0) break;
+    if (tiles.length >= totalResults) break;
 
     page++;
   }
